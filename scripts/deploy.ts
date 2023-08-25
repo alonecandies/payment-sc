@@ -8,13 +8,35 @@ async function main() {
 
   console.log("Deploying contracts with the account:", deployer.address);
 
-  const token = await ethers.deployContract("Token");
-  Config.setConfig(network + ".token", await token.getAddress());
-  const vault = await ethers.deployContract("Vault");
-  Config.setConfig(network + ".vault", await vault.getAddress());
+  const subscriptionPayment = await ethers.deployContract(
+    "SubscriptionPayment"
+  );
+  Config.setConfig(
+    network + ".subscriptionPayment",
+    await subscriptionPayment.getAddress()
+  );
 
-  console.log("Token address:", await token.getAddress());
-  console.log("Vault address:", await vault.getAddress());
+  const subscriptionPaymentImplFactory = await ethers.getContractFactory(
+    "SubscriptionPaymentImpl"
+  );
+  const subscriptionPaymentImpl = await subscriptionPaymentImplFactory.deploy(
+    "0x"
+  );
+  await subscriptionPaymentImpl.waitForDeployment();
+  Config.setConfig(
+    network + ".subscriptionPaymentImpl",
+    await subscriptionPaymentImpl.getAddress()
+  );
+
+  console.log(
+    "SubscriptionPayment address:",
+    await subscriptionPayment.getAddress()
+  );
+
+  console.log(
+    "SubscriptionPaymentImpl address:",
+    await subscriptionPaymentImpl.getAddress()
+  );
 
   Config.saveConfig();
 }
