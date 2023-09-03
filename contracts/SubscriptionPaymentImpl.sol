@@ -8,7 +8,7 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
-contract SubscriptionPaymentImpl is
+abstract contract SubscriptionPaymentImpl is
     Initializable,
     SubscriptionPaymentStorage,
     ISubscriptionPayment,
@@ -45,6 +45,10 @@ contract SubscriptionPaymentImpl is
         feeToken = IERC20Upgradeable(_feeTokenAddress);
     }
 
+    function setFeeToken(address _feeTokenAddress) external onlyAdmin {
+        feeToken = IERC20Upgradeable(_feeTokenAddress);
+    }
+
     function setPlan(
         uint256 _planType,
         uint256 _monthlyFee,
@@ -53,27 +57,12 @@ contract SubscriptionPaymentImpl is
         require(_planType > 0, "Invalid plan type");
         require(_monthlyFee > 0, "Invalid monthly fee");
         require(_yearlyFee > 0, "Invalid yearly fee");
-        bool planExists = false;
-        for (uint256 i = 0; i < plans.length; i++) {
-            if (plans[i].planType == _planType) {
-                planExists = true;
-                plans[i].monthlyFee = _monthlyFee;
-                plans[i].yearlyFee = _yearlyFee;
-                break;
-            }
-        }
-        if (!planExists) {
-            plans.push(Plan(_planType, _monthlyFee, _yearlyFee));
-        }
+        plans[_planType] = Plan(_planType, _monthlyFee, _yearlyFee);
         emit SetPlan(_planType, _monthlyFee, _yearlyFee);
     }
 
-    function getPlans()
-        external
-        view
-        returns (SubscriptionPaymentStorage.Plan[] memory)
-    {
-        return plans;
+    function getPlan(uint256 _planType) public view returns (Plan memory) {
+        return plans[_planType];
     }
 
     function subscribe(
@@ -91,17 +80,14 @@ contract SubscriptionPaymentImpl is
             "Invalid subscription plan"
         );
 
-        require(planType > 0 && planType <= plans.length, "Invalid plan type");
+        // mapping(uint256 => Plan) public plans;
+        require(
+            planType > 0 && plans[planType].planType > 0,
+            "Invalid plan type"
+        );
 
-        uint256 monthlyFee;
-        uint256 yearlyFee;
-        for (uint256 i = 0; i < plans.length; i++) {
-            if (plans[i].planType == planType) {
-                monthlyFee = plans[i].monthlyFee;
-                yearlyFee = plans[i].yearlyFee;
-                break;
-            }
-        }
+        uint256 monthlyFee = plans[planType].monthlyFee;
+        uint256 yearlyFee = plans[planType].yearlyFee;
 
         uint256 expiry = block.timestamp +
             (subscriptionPeriod == "year" ? YEAR_IN_SECONDS : MONTH_IN_SECONDS);
@@ -111,8 +97,11 @@ contract SubscriptionPaymentImpl is
             subscriptionPeriod == "year" ? yearlyFee : monthlyFee
         );
 
-        userSubscriptions[msg.sender].push(
-            Subscription(subscriptionPeriod, planType, expiry, autoRenewEnabled)
+        userSubscriptions[msg.sender][planType] = Subscription(
+            subscriptionPeriod,
+            planType,
+            expiry,
+            autoRenewEnabled
         );
 
         emit Subscribe(msg.sender, planType, expiry, autoRenewEnabled);
@@ -130,71 +119,45 @@ contract SubscriptionPaymentImpl is
             "Invalid subscription plan"
         );
 
-        require(planType > 0 && planType <= plans.length, "Invalid plan type");
+        require(
+            planType > 0 && plans[planType].planType > 0,
+            "Invalid plan type"
+        );
 
-        uint256 monthlyFee;
-        uint256 yearlyFee;
-        for (uint256 i = 0; i < plans.length; i++) {
-            if (plans[i].planType == planType) {
-                monthlyFee = plans[i].monthlyFee;
-                yearlyFee = plans[i].yearlyFee;
-                break;
-            }
-        }
+        uint256 monthlyFee = plans[planType].monthlyFee;
+        uint256 yearlyFee = plans[planType].yearlyFee;
 
-        Subscription[] storage subscriptions = userSubscriptions[user];
-        for (uint256 i = 0; i < subscriptions.length; i++) {
-            if (subscriptions[i].planType == planType) {
-                uint256 expiry = subscriptions[i].expiry;
-                uint256 newExpiry = expiry +
-                    (
-                        subscriptionPeriod == "year"
-                            ? YEAR_IN_SECONDS
-                            : MONTH_IN_SECONDS
-                    );
-                feeToken.safeTransferFrom(
-                    msg.sender,
-                    address(this),
-                    subscriptionPeriod == "year" ? yearlyFee : monthlyFee
-                );
-                subscriptions[i].expiry = newExpiry;
-                emit ExtendSubscription(user, planType, newExpiry);
-                break;
-            }
-        }
+        Subscription storage subscription = userSubscriptions[user][planType];
+        uint256 expiry = subscription.expiry;
+        uint256 newExpiry = expiry +
+            (subscriptionPeriod == "year" ? YEAR_IN_SECONDS : MONTH_IN_SECONDS);
+        feeToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            subscriptionPeriod == "year" ? yearlyFee : monthlyFee
+        );
+        subscription.expiry = newExpiry;
+        emit ExtendSubscription(user, planType, newExpiry);
     }
 
     function enableAutoRenew(address user, uint256 planType) external {
-        Subscription[] storage subscriptions = userSubscriptions[user];
-        for (uint256 i = 0; i < subscriptions.length; i++) {
-            if (subscriptions[i].planType == planType) {
-                subscriptions[i].autoRenewEnabled = true;
-                break;
-            }
-        }
+        Subscription storage subscription = userSubscriptions[user][planType];
+        require(subscription.expiry > 0, "User not subscribed");
+        subscription.autoRenewEnabled = true;
     }
 
     function disableAutoRenew(address user, uint256 planType) external {
-        Subscription[] storage subscriptions = userSubscriptions[user];
-        for (uint256 i = 0; i < subscriptions.length; i++) {
-            if (subscriptions[i].planType == planType) {
-                subscriptions[i].autoRenewEnabled = false;
-                break;
-            }
-        }
+        Subscription storage subscription = userSubscriptions[user][planType];
+        require(subscription.expiry > 0, "User not subscribed");
+        subscription.autoRenewEnabled = false;
     }
 
     function isSubscribed(
         address user,
         uint256 planType
     ) public view returns (bool) {
-        Subscription[] storage subscriptions = userSubscriptions[user];
-        for (uint256 i = 0; i < subscriptions.length; i++) {
-            if (subscriptions[i].planType == planType) {
-                return true;
-            }
-        }
-        return false;
+        Subscription storage subscription = userSubscriptions[user][planType];
+        return subscription.expiry > 0;
     }
 
     function withdrawTokens(
@@ -212,5 +175,9 @@ contract SubscriptionPaymentImpl is
     ) external onlyAdmin {
         (bool success, ) = sendTo.call{value: amount}("");
         require(success, "withdraw failed");
+    }
+
+    fallback() external payable {
+        revert("Invalid transaction");
     }
 }

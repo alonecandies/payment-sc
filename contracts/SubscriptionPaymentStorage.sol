@@ -21,7 +21,8 @@ contract SubscriptionPaymentStorage {
         bool autoRenewEnabled;
     }
 
-    Plan[] public plans;
+    mapping(uint256 => Plan) public plans;
 
-    mapping(address => Subscription[]) public userSubscriptions;
+    mapping(address => mapping(uint256 => Subscription))
+        public userSubscriptions;
 }
